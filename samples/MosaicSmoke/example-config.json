@@ -1,0 +1,20 @@
+{
+  "sources": [
+    { "name": "cam1", "uri": "udp://127.0.0.1:5001", "protocol": "MpegTsUdp" },
+    { "name": "cam2", "uri": "udp://127.0.0.1:5002", "protocol": "MpegTsUdp" },
+    { "name": "cam3", "uri": "udp://127.0.0.1:5003", "protocol": "MpegTsUdp" },
+    { "name": "cam4", "uri": "udp://127.0.0.1:5004", "protocol": "MpegTsUdp" }
+  ],
+  "grid": { "rows": 2, "cols": 2 },
+  "output": {
+    "uri": "udp://127.0.0.1:6000",
+    "protocol": "UdpMpegTs",
+    "width": 1920,
+    "height": 1080,
+    "frameRate": 25,
+    "bitrateKbps": 6000,
+    "gopSeconds": 1,
+    "lowLatency": true
+  },
+  "chrome": { "borderPx": 2, "showLabels": true }
+}
