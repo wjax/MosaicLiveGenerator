@@ -83,4 +83,71 @@ public class FilterGraphBuilderTests
         // ffmpeg drawtext escapes ' as \\'  ; inside C# raw becomes \'
         Assert.Contains(@"text='O\'Hara'", chain);
     }
+
+    [Fact]
+    public void FullGraph_TwoSources_ProducesBackgroundPlusOverlay()
+    {
+        var graph = FilterGraphBuilder.BuildFullGraph(
+            sources: new[] {
+                new SourcePlacement(0, new PixelRect(0, 0, 960, 540), TileFit.Letterbox, label: null),
+                new SourcePlacement(1, new PixelRect(960, 0, 960, 540), TileFit.Letterbox, label: null),
+            },
+            canvasW: 1920, canvasH: 1080,
+            frameRate: 25,
+            layoutChrome: new LayoutOptions());
+
+        Assert.Equal(
+            "[0:v]setpts=PTS-STARTPTS,fps=25,scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2:color=black[v0];" +
+            "[1:v]setpts=PTS-STARTPTS,fps=25,scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2:color=black[v1];" +
+            "color=c=black:s=1920x1080:r=25[bg];" +
+            "[bg][v0]overlay=x=0:y=0:shortest=0:eof_action=pass[c0];" +
+            "[c0][v1]overlay=x=960:y=0:shortest=0:eof_action=pass[out]",
+            graph);
+    }
+
+    [Fact]
+    public void FullGraph_RespectsCustomBackgroundColor()
+    {
+        var graph = FilterGraphBuilder.BuildFullGraph(
+            sources: new[] {
+                new SourcePlacement(0, new PixelRect(0, 0, 1920, 1080), TileFit.Stretch, null),
+            },
+            canvasW: 1920, canvasH: 1080,
+            frameRate: 25,
+            layoutChrome: new LayoutOptions(BackgroundColor: "0x202020"));
+
+        Assert.Contains("color=c=0x202020:s=1920x1080:r=25[bg]", graph);
+    }
+
+    [Fact]
+    public void FullGraph_AppendsBorderDrawboxWhenBorderPxSet()
+    {
+        var graph = FilterGraphBuilder.BuildFullGraph(
+            sources: new[] {
+                new SourcePlacement(0, new PixelRect(0, 0, 960, 540), TileFit.Letterbox, null),
+                new SourcePlacement(1, new PixelRect(960, 0, 960, 540), TileFit.Letterbox, null),
+            },
+            canvasW: 1920, canvasH: 1080,
+            frameRate: 25,
+            layoutChrome: new LayoutOptions(BorderPx: 2, BorderColor: "red"));
+
+        // border = chained drawbox filters on the output, ending in [out]
+        Assert.Contains("drawbox=x=0:y=0:w=960:h=540:color=red:t=2", graph);
+        Assert.Contains("drawbox=x=960:y=0:w=960:h=540:color=red:t=2", graph);
+        Assert.EndsWith("[out]", graph);
+    }
+
+    [Fact]
+    public void FullGraph_LabelsPropagateFromPlacements()
+    {
+        var graph = FilterGraphBuilder.BuildFullGraph(
+            sources: new[] {
+                new SourcePlacement(0, new PixelRect(0, 0, 960, 540), TileFit.Letterbox, label: "A"),
+            },
+            canvasW: 1920, canvasH: 1080,
+            frameRate: 25,
+            layoutChrome: new LayoutOptions(ShowLabels: true, LabelFontSize: 24));
+
+        Assert.Contains("drawtext=text='A':x=10:y=10:fontsize=24", graph);
+    }
 }

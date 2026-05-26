@@ -50,4 +50,76 @@ internal static class FilterGraphBuilder
         sb.Append("[v").Append(inputIndex).Append(']');
         return sb.ToString();
     }
+
+    public static string BuildFullGraph(
+        IReadOnlyList<SourcePlacement> sources,
+        int canvasW,
+        int canvasH,
+        int frameRate,
+        LayoutOptions layoutChrome)
+    {
+        if (sources.Count == 0)
+            throw new ArgumentException("at least one source required", nameof(sources));
+
+        var sb = new StringBuilder();
+
+        // Per-source chains
+        foreach (var s in sources)
+        {
+            var chain = BuildSourceChain(
+                s.InputIndex, s.Rect.Width, s.Rect.Height,
+                frameRate, s.Fit,
+                layoutChrome.BackgroundColor,
+                layoutChrome.ShowLabels ? s.label : null,
+                layoutChrome.LabelFontSize);
+            sb.Append(chain).Append(';');
+        }
+
+        // Background canvas
+        sb.Append("color=c=").Append(layoutChrome.BackgroundColor)
+          .Append(":s=").Append(canvasW).Append('x').Append(canvasH)
+          .Append(":r=").Append(frameRate).Append("[bg]");
+
+        // Overlay chain
+        var prev = "bg";
+        for (var i = 0; i < sources.Count; i++)
+        {
+            var s = sources[i];
+            var isLast = i == sources.Count - 1 && layoutChrome.BorderPx == 0;
+            var next = isLast ? "out" : $"c{i}";
+            sb.Append(';')
+              .Append('[').Append(prev).Append(']')
+              .Append("[v").Append(s.InputIndex).Append(']')
+              .Append("overlay=x=").Append(s.Rect.X)
+              .Append(":y=").Append(s.Rect.Y)
+              .Append(":shortest=0:eof_action=pass")
+              .Append('[').Append(next).Append(']');
+            prev = next;
+        }
+
+        // Borders: chain drawbox per source rect, ending in [out]
+        if (layoutChrome.BorderPx > 0)
+        {
+            for (var i = 0; i < sources.Count; i++)
+            {
+                var s = sources[i];
+                var isLast = i == sources.Count - 1;
+                var next = isLast ? "out" : $"b{i}";
+                sb.Append(';')
+                  .Append('[').Append(prev).Append(']')
+                  .Append("drawbox=x=").Append(s.Rect.X)
+                  .Append(":y=").Append(s.Rect.Y)
+                  .Append(":w=").Append(s.Rect.Width)
+                  .Append(":h=").Append(s.Rect.Height)
+                  .Append(":color=").Append(layoutChrome.BorderColor)
+                  .Append(":t=").Append(layoutChrome.BorderPx)
+                  .Append('[').Append(next).Append(']');
+                prev = next;
+            }
+        }
+
+        return sb.ToString();
+    }
 }
+
+internal sealed record SourcePlacement(int InputIndex, PixelRect Rect, TileFit Fit, string? label);
