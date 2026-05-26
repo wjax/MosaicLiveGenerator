@@ -2,14 +2,20 @@ using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using MosaicLiveGenerator;
 
-// Self-contained quick test: spawns 4 synthetic ffmpeg sources, composes them with
-// MosaicLiveGenerator, and pipes the mosaic out on udp://127.0.0.1:6000.
+// Self-contained quick test: spawns N synthetic ffmpeg sources, composes them with
+// MosaicLiveGenerator according to a configurable layout, and pipes the mosaic out
+// on udp://127.0.0.1:6000.
+//
+// Supported layouts: 2x2 (4 sources), 3x3 (9 sources), 1x2x3 (6 sources — one big
+// top-left, two underneath, three down the right column).
+//
 // View with:  ffplay -fflags nobuffer -i udp://127.0.0.1:6000
 // Or VLC:     vlc udp://@127.0.0.1:6000
 
 string? ffmpegPath = null;
 var duration = TimeSpan.Zero; // 0 = run until Ctrl-C
 var outputUri = new Uri("udp://127.0.0.1:6000");
+var layoutMode = LayoutMode.Grid2x2;
 
 for (var i = 0; i < args.Length; i++)
 {
@@ -23,6 +29,9 @@ for (var i = 0; i < args.Length; i++)
             break;
         case "--output" when i + 1 < args.Length:
             outputUri = new Uri(args[++i]);
+            break;
+        case "--layout" when i + 1 < args.Length:
+            layoutMode = ParseLayout(args[++i]);
             break;
         case "--help" or "-h":
             PrintUsage();
@@ -43,6 +52,7 @@ if (resolvedFfmpeg is null || !File.Exists(resolvedFfmpeg))
 }
 
 Console.WriteLine($"Using ffmpeg: {resolvedFfmpeg}");
+Console.WriteLine($"Layout: {LayoutName(layoutMode)}");
 
 using var loggerFactory = LoggerFactory.Create(b => b.AddSimpleConsole(o =>
 {
@@ -52,20 +62,16 @@ using var loggerFactory = LoggerFactory.Create(b => b.AddSimpleConsole(o =>
 
 var logger = loggerFactory.CreateLogger<MosaicSession>();
 
-// 1. Spawn 4 synthetic ffmpeg sources, one per tile.
-//    Each produces a distinct lavfi pattern over UDP/MPEG-TS so the mosaic is visually distinguishable.
-var sourcePorts = new[] { 17001, 17002, 17003, 17004 };
-var sourcePatterns = new[]
-{
-    "testsrc=size=640x480:rate=25",                   // color bars + sweep
-    "testsrc2=size=640x480:rate=25",                  // newer test pattern
-    "smptebars=size=640x480:rate=25",                 // SMPTE bars
-    "mandelbrot=size=640x480:rate=25:maxiter=100",    // fractal animation
-};
+// 1. Build the layout, pick the matching synthetic-source patterns.
+var (layout, lavfiPatterns) = BuildLayout(layoutMode);
+var sourceCount = lavfiPatterns.Length;
+var sourcePorts = Enumerable.Range(0, sourceCount).Select(i => 17001 + i).ToArray();
+
+// 2. Spawn the synthetic ffmpeg sources, one per tile.
 var synthetic = new List<Process>();
-for (var i = 0; i < 4; i++)
+for (var i = 0; i < sourceCount; i++)
 {
-    var p = StartSyntheticSource(resolvedFfmpeg, sourcePorts[i], sourcePatterns[i], $"CAM {i + 1}");
+    var p = StartSyntheticSource(resolvedFfmpeg, sourcePorts[i], lavfiPatterns[i], $"CAM {i + 1}");
     synthetic.Add(p);
 }
 
@@ -73,7 +79,7 @@ Console.WriteLine($"Spawned {synthetic.Count} synthetic sources on ports {string
 Console.WriteLine("Waiting 1.5s for sources to warm up...");
 await Task.Delay(1500);
 
-// 2. Build the MosaicSession.
+// 3. Build the MosaicSession.
 var sources = sourcePorts.Select((port, idx) =>
     new VideoSource(
         Name: $"CAM {idx + 1}",
@@ -82,7 +88,7 @@ var sources = sourcePorts.Select((port, idx) =>
 
 var options = new MosaicSessionOptions(
     Sources: sources,
-    Layout: Layout.Grid(2, 2),
+    Layout: layout,
     Output: new OutputOptions(
         Uri: outputUri,
         Width: 1280, Height: 720,
@@ -159,9 +165,80 @@ finally
 Console.WriteLine("Done.");
 return exitCode;
 
+// ---- layout selection ---------------------------------------------------
+
+static LayoutMode ParseLayout(string s) => s.ToLowerInvariant() switch
+{
+    "2x2" => LayoutMode.Grid2x2,
+    "3x3" => LayoutMode.Grid3x3,
+    "1x2x3" or "1+2+3" => LayoutMode.OneBigTwoBottomThreeRight,
+    _ => throw new ArgumentException($"unknown layout '{s}' (expected: 2x2 | 3x3 | 1x2x3)"),
+};
+
+static string LayoutName(LayoutMode m) => m switch
+{
+    LayoutMode.Grid2x2 => "2x2 grid (4 tiles)",
+    LayoutMode.Grid3x3 => "3x3 grid (9 tiles)",
+    LayoutMode.OneBigTwoBottomThreeRight => "1x2x3 (1 big top-left, 2 underneath, 3 down the right column)",
+    _ => "unknown",
+};
+
+static (Layout layout, string[] patterns) BuildLayout(LayoutMode mode)
+{
+    // 9 distinct lavfi sources to pick from. All are animated/varied so each tile is
+    // visually identifiable on the mosaic.
+    var all = new[]
+    {
+        "testsrc=size=640x480:rate=25",
+        "testsrc2=size=640x480:rate=25",
+        "smptebars=size=640x480:rate=25",
+        "smptehdbars=size=640x480:rate=25",
+        "mandelbrot=size=640x480:rate=25:maxiter=100",
+        "life=size=640x480:rate=25:mold=10",
+        "cellauto=size=640x480:rate=25:rule=110",
+        "yuvtestsrc=size=640x480:rate=25",
+        "rgbtestsrc=size=640x480:rate=25",
+    };
+
+    switch (mode)
+    {
+        case LayoutMode.Grid2x2:
+            return (Layout.Grid(2, 2), all.Take(4).ToArray());
+
+        case LayoutMode.Grid3x3:
+            return (Layout.Grid(3, 3), all.Take(9).ToArray());
+
+        case LayoutMode.OneBigTwoBottomThreeRight:
+            // canvas split:
+            //   +------------+-------+
+            //   |            |   4   |
+            //   |     1      +-------+
+            //   |            |   5   |
+            //   +------+-----+-------+
+            //   |  2   |  3  |   6   |
+            //   +------+-----+-------+
+            var third = 1.0 / 3.0;
+            var layout = Layout.Custom(new[]
+            {
+                new NormRect(0,    0,     0.5,  0.5),    // 1: big top-left
+                new NormRect(0,    0.5,   0.25, 0.5),    // 2: bottom-left a
+                new NormRect(0.25, 0.5,   0.25, 0.5),    // 3: bottom-left b
+                new NormRect(0.5,  0,     0.5,  third),  // 4: right column top
+                new NormRect(0.5,  third, 0.5,  third),  // 5: right column middle
+                new NormRect(0.5,  2*third, 0.5, third), // 6: right column bottom
+            });
+            return (layout, all.Take(6).ToArray());
+
+        default:
+            throw new ArgumentOutOfRangeException(nameof(mode));
+    }
+}
+
+// ---- helpers ------------------------------------------------------------
+
 static Process StartSyntheticSource(string ffmpeg, int port, string lavfiPattern, string label)
 {
-    // testsrc/smptebars/etc + drawtext overlay so each tile is visually identifiable,
+    // lavfi pattern + drawtext overlay so each tile is visually identifiable,
     // re-encoded with low-latency H.264 and shipped over UDP/MPEG-TS.
     var psi = new ProcessStartInfo
     {
@@ -227,11 +304,17 @@ static string? TryFindFfmpegOnPath()
 
 static void PrintUsage()
 {
-    Console.WriteLine("MosaicQuickTest — runs MosaicLiveGenerator against 4 synthetic sources.");
+    Console.WriteLine("MosaicQuickTest — runs MosaicLiveGenerator against synthetic sources.");
     Console.WriteLine();
-    Console.WriteLine("Usage: MosaicQuickTest [--ffmpeg <path>] [--output <uri>] [--duration <secs>]");
+    Console.WriteLine("Usage: MosaicQuickTest [--layout <name>] [--ffmpeg <path>]");
+    Console.WriteLine("                       [--output <uri>] [--duration <secs>]");
     Console.WriteLine();
     Console.WriteLine("Options:");
+    Console.WriteLine("  --layout <name>     Mosaic layout. One of:");
+    Console.WriteLine("                        2x2     — 4 tiles, 2 rows × 2 cols (default)");
+    Console.WriteLine("                        3x3     — 9 tiles, 3 rows × 3 cols");
+    Console.WriteLine("                        1x2x3   — 6 tiles: 1 big top-left,");
+    Console.WriteLine("                                  2 underneath, 3 down the right column");
     Console.WriteLine("  --ffmpeg <path>     Explicit path to ffmpeg binary.");
     Console.WriteLine("                      Default: looks on PATH.");
     Console.WriteLine("  --output <uri>      Output URI (udp:// or rtp://).");
@@ -241,4 +324,11 @@ static void PrintUsage()
     Console.WriteLine("  --help, -h          Show this help.");
     Console.WriteLine();
     Console.WriteLine("View the mosaic with:  ffplay -fflags nobuffer -i udp://127.0.0.1:6000");
+}
+
+internal enum LayoutMode
+{
+    Grid2x2,
+    Grid3x3,
+    OneBigTwoBottomThreeRight,
 }
