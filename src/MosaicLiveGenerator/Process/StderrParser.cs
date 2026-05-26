@@ -13,10 +13,13 @@ internal sealed class StderrParser
     private readonly Queue<string> _tail = new();
     private readonly Dictionary<int, SourceConnectivity> _sourceStates = new();
     private readonly HashSet<int> _sourcesInReconnect = new();
+    private bool _captureSdp;
+    private readonly System.Text.StringBuilder _sdpBuf = new();
 
     public event EventHandler? Running;
     public event EventHandler<StartupErrorSignal>? StartupError;
     public event EventHandler<SourceConnectivitySignal>? SourceConnectivity;
+    public event EventHandler<OutputSdpSignal>? OutputSdp;
 
     public void Feed(string line)
     {
@@ -25,6 +28,29 @@ internal sealed class StderrParser
         {
             _tail.Enqueue(line);
             while (_tail.Count > 32) _tail.Dequeue();
+        }
+
+        if (_captureSdp)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                var sdp = _sdpBuf.ToString();
+                _sdpBuf.Clear();
+                _captureSdp = false;
+                if (sdp.Length > 0)
+                    OutputSdp?.Invoke(this, new OutputSdpSignal(sdp));
+            }
+            else
+            {
+                _sdpBuf.Append(line).Append('\n');
+            }
+            return;
+        }
+
+        if (line.Trim().Equals("SDP:", StringComparison.Ordinal))
+        {
+            _captureSdp = true;
+            return;
         }
 
         var inputMatch = InputContextRegex.Match(line);

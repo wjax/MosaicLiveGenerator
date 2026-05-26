@@ -106,4 +106,28 @@ public class StderrParserTests
         Assert.Equal(SourceConnectivity.Connected, signals[1].NewState);
         Assert.Equal(1, signals[1].SourceIndex);
     }
+
+    [Fact]
+    public void RtpOutputSdpBlock_IsCapturedAsOneSignal()
+    {
+        var parser = new StderrParser();
+        OutputSdpSignal? captured = null;
+        parser.OutputSdp += (_, s) => captured = s;
+
+        // ffmpeg emits SDP block bracketed by "SDP:" line and a blank line
+        parser.Feed("SDP:");
+        parser.Feed("v=0");
+        parser.Feed("o=- 0 0 IN IP4 127.0.0.1");
+        parser.Feed("s=No Name");
+        parser.Feed("c=IN IP4 127.0.0.1");
+        parser.Feed("t=0 0");
+        parser.Feed("m=video 6000 RTP/AVP 96");
+        parser.Feed("a=rtpmap:96 H264/90000");
+        parser.Feed(""); // terminator
+
+        Assert.NotNull(captured);
+        Assert.Contains("v=0", captured!.Sdp);
+        Assert.Contains("m=video 6000 RTP/AVP 96", captured.Sdp);
+        Assert.Contains("a=rtpmap:96 H264/90000", captured.Sdp);
+    }
 }
