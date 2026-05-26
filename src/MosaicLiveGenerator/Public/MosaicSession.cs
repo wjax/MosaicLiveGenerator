@@ -53,9 +53,7 @@ public sealed class MosaicSession : IAsyncDisposable
 
     public event EventHandler<SessionStateChangedEventArgs>? StateChanged;
     public event EventHandler<SourceConnectivityChangedEventArgs>? SourceConnectivityChanged;
-#pragma warning disable CS0067 // Raised in Task 23
     public event EventHandler<FaultedEventArgs>? Faulted;
-#pragma warning restore CS0067
 
     public async Task StartAsync(CancellationToken ct = default)
     {
@@ -155,11 +153,62 @@ public sealed class MosaicSession : IAsyncDisposable
         }
     }
 
-    public Task StopAsync(CancellationToken ct = default)
-        => throw new NotImplementedException("Task 23");
+    public async Task StopAsync(CancellationToken ct = default)
+    {
+        var current = _state.Current;
+        if (current == SessionState.Stopped) return;
+        if (current == SessionState.Stopping) return;
 
-    public ValueTask DisposeAsync()
-        => throw new NotImplementedException("Task 23");
+        if (!_state.TryTransition(current, SessionState.Stopping))
+        {
+            // someone else moved us; check terminal
+            if (_state.Current == SessionState.Stopped) return;
+            throw new InvalidOperationException($"Cannot stop: state={_state.Current}.");
+        }
+
+        try
+        {
+            if (_host is { IsRunning: true })
+            {
+                try { await _host.SendGracefulQuitAsync(ct).ConfigureAwait(false); }
+                catch { /* fall through to kill */ }
+
+                if (_exitTcs is not null)
+                {
+                    // Wait up to 5 s for a graceful exit; cancellation shortens the window.
+                    var graceMs = ct.IsCancellationRequested
+                        ? 0
+                        : (int)TimeSpan.FromSeconds(5).TotalMilliseconds;
+                    if (graceMs > 0)
+                    {
+                        using var graceCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                        graceCts.CancelAfter(graceMs);
+                        try { await _exitTcs.Task.WaitAsync(graceCts.Token).ConfigureAwait(false); }
+                        catch { /* timed out or cancelled – fall through to kill */ }
+                    }
+                    if (_host.IsRunning) _host.Kill();
+                }
+                else
+                {
+                    _host.Kill();
+                }
+            }
+        }
+        finally
+        {
+            await SafeTearDownAsync().ConfigureAwait(false);
+            _state.TryTransition(SessionState.Stopping, SessionState.Stopped);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_state.Current != SessionState.Stopped)
+        {
+            try { await StopAsync().ConfigureAwait(false); }
+            catch { /* swallow during dispose */ }
+        }
+    }
 
     private void OnSourceConnectivitySignal(object? sender, SourceConnectivitySignal sig)
     {
@@ -174,7 +223,22 @@ public sealed class MosaicSession : IAsyncDisposable
         });
     }
 
-    private void OnProcessExited(object? sender, ProcessExitInfo info) => _exitTcs?.TrySetResult(info);
+    private void OnProcessExited(object? sender, ProcessExitInfo info)
+    {
+        _exitTcs?.TrySetResult(info);
+
+        // Unexpected exit while Running -> Faulted
+        if (_state.Current == SessionState.Running)
+        {
+            var ex = new MosaicRuntimeException($"ffmpeg exited unexpectedly with code {info.ExitCode}.")
+            {
+                StderrTail = _parser?.GetStderrTail() ?? ""
+            };
+            LastError = ex;
+            if (_state.TryTransition(SessionState.Running, SessionState.Faulted))
+                Faulted?.Invoke(this, new FaultedEventArgs { Error = ex });
+        }
+    }
 
     private void LogStderr(string line)
     {

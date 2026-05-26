@@ -92,4 +92,12 @@ internal static class TestListExtensions
     }
 
     public static bool Contains<T>(this IReadOnlyList<T> list, T value) => list.IndexOf(value) >= 0;
+
+    public static int Count<T>(this IReadOnlyList<T> list, Func<T, bool> predicate)
+    {
+        var count = 0;
+        for (var i = 0; i < list.Count; i++)
+            if (predicate(list[i])) count++;
+        return count;
+    }
 }
