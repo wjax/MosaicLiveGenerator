@@ -24,7 +24,7 @@ public sealed class MosaicSession : IAsyncDisposable
     public MosaicSession(
         MosaicSessionOptions options,
         ILogger<MosaicSession>? logger = null)
-        : this(options, logger, () => throw new NotImplementedException("Real FfmpegProcessHost arrives in Task 26"))
+        : this(options, logger, () => new MosaicLiveGenerator.Process.FfmpegProcessHost())
     {
     }
 
