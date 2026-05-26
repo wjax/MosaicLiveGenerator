@@ -64,4 +64,81 @@ public class MosaicSessionStartTests
         }
         finally { File.Delete(ffmpegPath); }
     }
+
+    [Fact]
+    public async Task StartAsync_TimesOutWhenNoFrameLine()
+    {
+        var ffmpegPath = FakeFfmpegPath();
+        try
+        {
+            var fake = new FakeProcessHost();
+            var options = MakeOptions(ffmpegPath) with
+            {
+                Ffmpeg = new FfmpegOptions(BinaryPath: ffmpegPath, StartupTimeout: TimeSpan.FromMilliseconds(200))
+            };
+            var session = new MosaicSession(options, null, () => fake);
+
+            var ex = await Assert.ThrowsAsync<MosaicStartupException>(() => session.StartAsync());
+
+            Assert.Equal(MosaicStartupReason.Timeout, ex.Reason);
+            Assert.Equal(SessionState.Faulted, session.State);
+        }
+        finally { File.Delete(ffmpegPath); }
+    }
+
+    [Fact]
+    public async Task StartAsync_ImmediateProcessExit_RaisesStartupExceptionWithImmediateExit()
+    {
+        var ffmpegPath = FakeFfmpegPath();
+        try
+        {
+            var fake = new FakeProcessHost();
+            var session = new MosaicSession(MakeOptions(ffmpegPath), null, () => fake);
+
+            var startTask = session.StartAsync();
+            await Task.Delay(20);
+            fake.EmitExit(new ProcessExitInfo(ExitCode: 1, TimedOutOnGraceful: false));
+
+            var ex = await Assert.ThrowsAsync<MosaicStartupException>(() => startTask);
+            Assert.Equal(MosaicStartupReason.ImmediateExit, ex.Reason);
+        }
+        finally { File.Delete(ffmpegPath); }
+    }
+
+    [Fact]
+    public async Task StartAsync_ErrorOpeningInput_RaisesBadInputSource()
+    {
+        var ffmpegPath = FakeFfmpegPath();
+        try
+        {
+            var fake = new FakeProcessHost();
+            var session = new MosaicSession(MakeOptions(ffmpegPath), null, () => fake);
+
+            var startTask = session.StartAsync();
+            await Task.Delay(20);
+            fake.EmitStderr("[udp @ 0x55] Error opening input file udp://127.0.0.1:5001");
+
+            var ex = await Assert.ThrowsAsync<MosaicStartupException>(() => startTask);
+            Assert.Equal(MosaicStartupReason.BadInputSource, ex.Reason);
+            Assert.Contains("Error opening input", ex.StderrTail);
+        }
+        finally { File.Delete(ffmpegPath); }
+    }
+
+    [Fact]
+    public async Task StartAsync_FfmpegNotFound_RaisesFfmpegNotFound()
+    {
+        // Pass a BinaryPath that doesn't exist — resolver will throw configuration exception
+        var bogus = Path.Combine(Path.GetTempPath(), $"no-ffmpeg-{Guid.NewGuid()}.exe");
+        var fake = new FakeProcessHost();
+        var options = new MosaicSessionOptions(
+            Sources: new[] { new VideoSource("a", new Uri("udp://127.0.0.1:5001"), SourceProtocol.MpegTsUdp) },
+            Layout: Layout.Grid(1, 1),
+            Output: new OutputOptions(new Uri("udp://127.0.0.1:6000")),
+            Ffmpeg: new FfmpegOptions(BinaryPath: bogus));
+
+        var session = new MosaicSession(options, null, () => fake);
+        await Assert.ThrowsAsync<MosaicConfigurationException>(() => session.StartAsync());
+        Assert.Equal(SessionState.Faulted, session.State);
+    }
 }
