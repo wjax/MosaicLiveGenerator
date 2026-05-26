@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>MosaicLiveGenerator</RootNamespace>
+    <AssemblyName>MosaicLiveGenerator</AssemblyName>
+    <PackageId>MosaicLiveGenerator</PackageId>
+    <Description>Compose live UDP/RTP video streams into one mosaic via ffmpeg.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="MosaicLiveGenerator.Tests" />
+  </ItemGroup>
+</Project>
