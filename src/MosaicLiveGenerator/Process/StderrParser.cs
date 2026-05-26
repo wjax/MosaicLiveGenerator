@@ -11,6 +11,8 @@ internal sealed class StderrParser
     private int _lastInputContext = -1;
     private int _linesSinceInputContext = int.MaxValue;
     private readonly Queue<string> _tail = new();
+    private readonly Dictionary<int, SourceConnectivity> _sourceStates = new();
+    private readonly HashSet<int> _sourcesInReconnect = new();
 
     public event EventHandler? Running;
     public event EventHandler<StartupErrorSignal>? StartupError;
@@ -36,33 +38,57 @@ internal sealed class StderrParser
             _linesSinceInputContext++;
         }
 
-        if (!_runningEmitted && FrameRegex.IsMatch(line))
+        if (FrameRegex.IsMatch(line))
         {
-            _runningEmitted = true;
-            Running?.Invoke(this, EventArgs.Empty);
+            // First-ever frame line: transition to Running.
+            if (!_runningEmitted)
+            {
+                _runningEmitted = true;
+                Running?.Invoke(this, EventArgs.Empty);
+            }
+
+            // Any frame line after a reconnect was logged: restore connectivity.
+            if (_sourcesInReconnect.Count > 0)
+            {
+                foreach (var idx in _sourcesInReconnect.ToArray())
+                {
+                    if (_sourceStates.TryGetValue(idx, out var cur) && cur != MosaicLiveGenerator.SourceConnectivity.Connected)
+                    {
+                        _sourceStates[idx] = MosaicLiveGenerator.SourceConnectivity.Connected;
+                        SourceConnectivity?.Invoke(this,
+                            new SourceConnectivitySignal(idx, MosaicLiveGenerator.SourceConnectivity.Connected, line));
+                    }
+                }
+                _sourcesInReconnect.Clear();
+            }
             return;
         }
 
-        if (line.Contains("Error opening input", StringComparison.OrdinalIgnoreCase))
+        if (line.Contains("Error opening input", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("No such file", StringComparison.OrdinalIgnoreCase))
         {
             StartupError?.Invoke(this, new StartupErrorSignal(MosaicStartupReason.BadInputSource, line));
             return;
         }
 
-        if (line.Contains("No such file", StringComparison.OrdinalIgnoreCase))
+        // Reconnect notification ⇒ remember which source so the next frame= flips it back.
+        if (line.Contains("Will reconnect at", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("Reconnecting", StringComparison.OrdinalIgnoreCase))
         {
-            StartupError?.Invoke(this, new StartupErrorSignal(MosaicStartupReason.BadInputSource, line));
+            if (_lastInputContext >= 0 && _linesSinceInputContext <= 5)
+                _sourcesInReconnect.Add(_lastInputContext);
             return;
         }
 
-        // Connection errors (Task 17 expands this; the hook is here)
         if (line.Contains("Connection refused", StringComparison.OrdinalIgnoreCase) ||
             line.Contains("Connection timed out", StringComparison.OrdinalIgnoreCase) ||
             line.Contains("Input/output error", StringComparison.OrdinalIgnoreCase))
         {
             var idx = _linesSinceInputContext <= 5 ? _lastInputContext : -1;
+            if (idx >= 0)
+                _sourceStates[idx] = MosaicLiveGenerator.SourceConnectivity.Disconnected;
             SourceConnectivity?.Invoke(this,
-                new SourceConnectivitySignal(idx, global::MosaicLiveGenerator.SourceConnectivity.Disconnected, line));
+                new SourceConnectivitySignal(idx, MosaicLiveGenerator.SourceConnectivity.Disconnected, line));
         }
     }
 
