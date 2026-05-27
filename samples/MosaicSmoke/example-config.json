@@ -17,5 +17,9 @@
     "lowLatency": true,
     "hwAccel": "none"
   },
-  "chrome": { "borderPx": 2, "showLabels": true }
+  "chrome": {
+    "borderPx": 2,
+    "showLabels": true,
+    "labelFontFile": "C:/Windows/Fonts/arial.ttf"
+  }
 }

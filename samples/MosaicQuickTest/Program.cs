@@ -105,7 +105,8 @@ var options = new MosaicSessionOptions(
         BorderPx: 2,
         BorderColor: "white",
         ShowLabels: true,
-        LabelFontSize: 24),
+        LabelFontSize: 24,
+        LabelFontFile: TryFindSystemFont()),
     Ffmpeg: new FfmpegOptions(
         BinaryPath: resolvedFfmpeg,
         StartupTimeout: TimeSpan.FromSeconds(15)));
@@ -196,6 +197,23 @@ static string EncoderName(HwAccel a) => a switch
     HwAccel.Intel => "h264_qsv (Intel Quick Sync)",
     _ => a.ToString(),
 };
+
+// drawtext needs an explicit font on Windows since fontconfig isn't configured
+// in most bundled ffmpeg builds. Probe common system fonts and return the first hit.
+static string? TryFindSystemFont()
+{
+    if (!OperatingSystem.IsWindows()) return null;
+    string[] candidates =
+    {
+        @"C:\Windows\Fonts\arial.ttf",
+        @"C:\Windows\Fonts\segoeui.ttf",
+        @"C:\Windows\Fonts\tahoma.ttf",
+        @"C:\Windows\Fonts\consola.ttf",
+    };
+    foreach (var c in candidates)
+        if (File.Exists(c)) return c;
+    return null;
+}
 
 static string LayoutName(LayoutMode m) => m switch
 {

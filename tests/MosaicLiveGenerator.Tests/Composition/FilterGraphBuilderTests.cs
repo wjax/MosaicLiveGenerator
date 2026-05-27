@@ -85,6 +85,49 @@ public class FilterGraphBuilderTests
     }
 
     [Fact]
+    public void Label_WithFontFile_EmitsFontfileBeforeText()
+    {
+        var chain = FilterGraphBuilder.BuildSourceChain(
+            inputIndex: 0, slotW: 100, slotH: 100, frameRate: 25,
+            fit: TileFit.Stretch, backgroundColor: "black",
+            label: "A", labelFontSize: 18,
+            labelFontFile: @"C:\Windows\Fonts\arial.ttf");
+
+        // Backslashes → forward slashes; colon → escaped colon
+        Assert.Contains(@"drawtext=fontfile='C\:/Windows/Fonts/arial.ttf':text='A'", chain);
+    }
+
+    [Fact]
+    public void Label_WithoutFontFile_OmitsFontfileClause()
+    {
+        var chain = FilterGraphBuilder.BuildSourceChain(
+            inputIndex: 0, slotW: 100, slotH: 100, frameRate: 25,
+            fit: TileFit.Stretch, backgroundColor: "black",
+            label: "A", labelFontSize: 18,
+            labelFontFile: null);
+
+        Assert.DoesNotContain("fontfile=", chain);
+        Assert.Contains("drawtext=text='A'", chain);
+    }
+
+    [Fact]
+    public void FullGraph_PropagatesLayoutOptionsLabelFontFile()
+    {
+        var graph = FilterGraphBuilder.BuildFullGraph(
+            sources: new[] {
+                new SourcePlacement(0, new PixelRect(0, 0, 960, 540), TileFit.Letterbox, label: "A"),
+            },
+            canvasW: 1920, canvasH: 1080,
+            frameRate: 25,
+            layoutChrome: new LayoutOptions(
+                ShowLabels: true,
+                LabelFontSize: 18,
+                LabelFontFile: @"C:\Windows\Fonts\arial.ttf"));
+
+        Assert.Contains(@"fontfile='C\:/Windows/Fonts/arial.ttf'", graph);
+    }
+
+    [Fact]
     public void FullGraph_TwoSources_ProducesBackgroundPlusOverlay()
     {
         var graph = FilterGraphBuilder.BuildFullGraph(

@@ -12,7 +12,8 @@ internal static class FilterGraphBuilder
         TileFit fit,
         string backgroundColor,
         string? label,
-        int labelFontSize)
+        int labelFontSize,
+        string? labelFontFile = null)
     {
         var sb = new StringBuilder();
         sb.Append('[').Append(inputIndex).Append(":v]");
@@ -41,8 +42,13 @@ internal static class FilterGraphBuilder
 
         if (!string.IsNullOrEmpty(label))
         {
-            var escaped = label.Replace(@"\", @"\\").Replace("'", @"\'");
-            sb.Append(",drawtext=text='").Append(escaped).Append('\'')
+            var escapedLabel = label.Replace(@"\", @"\\").Replace("'", @"\'");
+            sb.Append(",drawtext=");
+            if (!string.IsNullOrEmpty(labelFontFile))
+            {
+                sb.Append("fontfile='").Append(EscapeFilterPath(labelFontFile)).Append("':");
+            }
+            sb.Append("text='").Append(escapedLabel).Append('\'')
               .Append(":x=10:y=10:fontsize=").Append(labelFontSize)
               .Append(":fontcolor=white:box=1:boxcolor=black@0.5");
         }
@@ -71,7 +77,8 @@ internal static class FilterGraphBuilder
                 frameRate, s.Fit,
                 layoutChrome.BackgroundColor,
                 layoutChrome.ShowLabels ? s.label : null,
-                layoutChrome.LabelFontSize);
+                layoutChrome.LabelFontSize,
+                layoutChrome.LabelFontFile);
             sb.Append(chain).Append(';');
         }
 
@@ -120,6 +127,14 @@ internal static class FilterGraphBuilder
 
         return sb.ToString();
     }
+
+    /// <summary>
+    /// Escape a Windows/Unix path for inclusion inside an ffmpeg filter argument.
+    /// Backslashes become forward slashes (ffmpeg accepts either on Windows), and
+    /// colons get escaped so they aren't read as filter-argument separators.
+    /// </summary>
+    private static string EscapeFilterPath(string path) =>
+        path.Replace('\\', '/').Replace(":", @"\:");
 }
 
 internal sealed record SourcePlacement(int InputIndex, PixelRect Rect, TileFit Fit, string? label);

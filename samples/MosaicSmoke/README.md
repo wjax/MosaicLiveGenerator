@@ -87,7 +87,10 @@ Edit `example-config.json` to change source URIs, layout, output, etc. The shape
     // width, height, frameRate, bitrateKbps, gopSeconds, lowLatency
     "hwAccel": "none"                         // "none" | "nvidia" | "intel"
   },
-  "chrome": { "backgroundColor": "black", "borderPx": 2, "showLabels": true },
+  "chrome": {
+    "backgroundColor": "black", "borderPx": 2, "showLabels": true,
+    "labelFontFile": "C:/Windows/Fonts/arial.ttf"  // required on Windows; drawtext needs an explicit font
+  },
   "ffmpeg": { "binaryPath": "./lib/ffmpeg.exe" } // optional; --ffmpeg CLI flag wins
 }
 ```
