@@ -8,4 +8,5 @@ public sealed record OutputOptions(
     int FrameRate = 25,
     int BitrateKbps = 6000,
     int GopSeconds = 1,
-    bool LowLatency = true);
+    bool LowLatency = true,
+    HwAccel HwAccel = HwAccel.None);

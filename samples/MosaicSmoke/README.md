@@ -82,11 +82,20 @@ Edit `example-config.json` to change source URIs, layout, output, etc. The shape
   ],
   "grid":   { "rows": 2, "cols": 2 },        // either grid…
   "cells":  [ /* { x, y, width, height } */ ],// …or explicit normalized rects
-  "output": { "uri": "udp://...", "protocol": "UdpMpegTs", /* width, height, frameRate, bitrateKbps, gopSeconds, lowLatency */ },
+  "output": {
+    "uri": "udp://...", "protocol": "UdpMpegTs",
+    // width, height, frameRate, bitrateKbps, gopSeconds, lowLatency
+    "hwAccel": "none"                         // "none" | "nvidia" | "intel"
+  },
   "chrome": { "backgroundColor": "black", "borderPx": 2, "showLabels": true },
   "ffmpeg": { "binaryPath": "./lib/ffmpeg.exe" } // optional; --ffmpeg CLI flag wins
 }
 ```
+
+**`hwAccel`** picks the H.264 encoder:
+- `"none"` (default) — software `libx264`. Works everywhere.
+- `"nvidia"` — `h264_nvenc` (NVIDIA GPU + driver 570+).
+- `"intel"` — `h264_qsv` (Intel iGPU or Arc).
 
 ## Troubleshooting
 

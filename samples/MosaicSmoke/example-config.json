@@ -14,7 +14,8 @@
     "frameRate": 25,
     "bitrateKbps": 6000,
     "gopSeconds": 1,
-    "lowLatency": true
+    "lowLatency": true,
+    "hwAccel": "none"
   },
   "chrome": { "borderPx": 2, "showLabels": true }
 }

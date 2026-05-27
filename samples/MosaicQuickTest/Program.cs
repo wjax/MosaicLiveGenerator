@@ -16,6 +16,7 @@ string? ffmpegPath = null;
 var duration = TimeSpan.Zero; // 0 = run until Ctrl-C
 var outputUri = new Uri("udp://127.0.0.1:6000");
 var layoutMode = LayoutMode.Grid2x2;
+var hwAccel = HwAccel.None;
 
 for (var i = 0; i < args.Length; i++)
 {
@@ -32,6 +33,9 @@ for (var i = 0; i < args.Length; i++)
             break;
         case "--layout" when i + 1 < args.Length:
             layoutMode = ParseLayout(args[++i]);
+            break;
+        case "--hwaccel" when i + 1 < args.Length:
+            hwAccel = ParseHwAccel(args[++i]);
             break;
         case "--help" or "-h":
             PrintUsage();
@@ -53,6 +57,7 @@ if (resolvedFfmpeg is null || !File.Exists(resolvedFfmpeg))
 
 Console.WriteLine($"Using ffmpeg: {resolvedFfmpeg}");
 Console.WriteLine($"Layout: {LayoutName(layoutMode)}");
+Console.WriteLine($"Encoder: {EncoderName(hwAccel)}");
 
 using var loggerFactory = LoggerFactory.Create(b => b.AddSimpleConsole(o =>
 {
@@ -93,7 +98,8 @@ var options = new MosaicSessionOptions(
         Uri: outputUri,
         Width: 1280, Height: 720,
         FrameRate: 25,
-        BitrateKbps: 3000),
+        BitrateKbps: 3000,
+        HwAccel: hwAccel),
     LayoutChrome: new LayoutOptions(
         BackgroundColor: "black",
         BorderPx: 2,
@@ -173,6 +179,22 @@ static LayoutMode ParseLayout(string s) => s.ToLowerInvariant() switch
     "3x3" => LayoutMode.Grid3x3,
     "1x2x3" or "1+2+3" => LayoutMode.OneBigTwoBottomThreeRight,
     _ => throw new ArgumentException($"unknown layout '{s}' (expected: 2x2 | 3x3 | 1x2x3)"),
+};
+
+static HwAccel ParseHwAccel(string s) => s.ToLowerInvariant() switch
+{
+    "none" => HwAccel.None,
+    "nvidia" or "nvenc" => HwAccel.Nvidia,
+    "intel" or "qsv" => HwAccel.Intel,
+    _ => throw new ArgumentException($"unknown hwaccel '{s}' (expected: none | nvidia | intel)"),
+};
+
+static string EncoderName(HwAccel a) => a switch
+{
+    HwAccel.None => "libx264 (software)",
+    HwAccel.Nvidia => "h264_nvenc (NVIDIA)",
+    HwAccel.Intel => "h264_qsv (Intel Quick Sync)",
+    _ => a.ToString(),
 };
 
 static string LayoutName(LayoutMode m) => m switch
@@ -306,8 +328,8 @@ static void PrintUsage()
 {
     Console.WriteLine("MosaicQuickTest — runs MosaicLiveGenerator against synthetic sources.");
     Console.WriteLine();
-    Console.WriteLine("Usage: MosaicQuickTest [--layout <name>] [--ffmpeg <path>]");
-    Console.WriteLine("                       [--output <uri>] [--duration <secs>]");
+    Console.WriteLine("Usage: MosaicQuickTest [--layout <name>] [--hwaccel <vendor>]");
+    Console.WriteLine("                       [--ffmpeg <path>] [--output <uri>] [--duration <secs>]");
     Console.WriteLine();
     Console.WriteLine("Options:");
     Console.WriteLine("  --layout <name>     Mosaic layout. One of:");
@@ -315,6 +337,10 @@ static void PrintUsage()
     Console.WriteLine("                        3x3     — 9 tiles, 3 rows × 3 cols");
     Console.WriteLine("                        1x2x3   — 6 tiles: 1 big top-left,");
     Console.WriteLine("                                  2 underneath, 3 down the right column");
+    Console.WriteLine("  --hwaccel <vendor>  Output H.264 encoder. One of:");
+    Console.WriteLine("                        none    — libx264 (software, default)");
+    Console.WriteLine("                        nvidia  — h264_nvenc (NVIDIA GPU)");
+    Console.WriteLine("                        intel   — h264_qsv (Intel iGPU / Arc)");
     Console.WriteLine("  --ffmpeg <path>     Explicit path to ffmpeg binary.");
     Console.WriteLine("                      Default: looks on PATH.");
     Console.WriteLine("  --output <uri>      Output URI (udp:// or rtp://).");

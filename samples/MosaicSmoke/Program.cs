@@ -52,6 +52,10 @@ Layout layout = config.Grid is { Rows: > 0, Cols: > 0 }
 // --ffmpeg CLI overrides config.ffmpeg.binaryPath, which overrides PATH lookup.
 var resolvedFfmpegPath = ffmpegPath ?? config.Ffmpeg?.BinaryPath;
 
+var hwAccel = config.Output.HwAccel is null
+    ? HwAccel.None
+    : Enum.Parse<HwAccel>(config.Output.HwAccel, ignoreCase: true);
+
 var options = new MosaicSessionOptions(
     Sources: sources,
     Layout: layout,
@@ -63,7 +67,8 @@ var options = new MosaicSessionOptions(
         FrameRate: config.Output.FrameRate ?? 25,
         BitrateKbps: config.Output.BitrateKbps ?? 6000,
         GopSeconds: config.Output.GopSeconds ?? 1,
-        LowLatency: config.Output.LowLatency ?? true),
+        LowLatency: config.Output.LowLatency ?? true,
+        HwAccel: hwAccel),
     LayoutChrome: new LayoutOptions(
         BackgroundColor: config.Chrome?.BackgroundColor ?? "black",
         BorderPx: config.Chrome?.BorderPx ?? 0,
@@ -129,6 +134,6 @@ internal record SmokeConfig(
 internal record SmokeSource(string Name, string Uri, string Protocol, string? Fit);
 internal record SmokeGrid(int Rows, int Cols);
 internal record SmokeCell(double X, double Y, double Width, double Height);
-internal record SmokeOutput(string Uri, string Protocol, int? Width, int? Height, int? FrameRate, int? BitrateKbps, int? GopSeconds, bool? LowLatency);
+internal record SmokeOutput(string Uri, string Protocol, int? Width, int? Height, int? FrameRate, int? BitrateKbps, int? GopSeconds, bool? LowLatency, string? HwAccel = null);
 internal record SmokeChrome(string? BackgroundColor, int? BorderPx, bool? ShowLabels);
 internal record SmokeFfmpeg(string? BinaryPath);
