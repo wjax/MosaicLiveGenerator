@@ -2,13 +2,31 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using MosaicLiveGenerator;
 
-if (args.Length < 2 || args[0] != "--config")
+string? configPath = null;
+string? ffmpegPath = null;
+
+for (var i = 0; i < args.Length; i++)
 {
-    Console.WriteLine("usage: MosaicSmoke --config <path-to-json>");
+    switch (args[i])
+    {
+        case "--config" when i + 1 < args.Length:
+            configPath = args[++i];
+            break;
+        case "--ffmpeg" when i + 1 < args.Length:
+            ffmpegPath = args[++i];
+            break;
+        case "--help" or "-h":
+            PrintUsage();
+            return 0;
+    }
+}
+
+if (configPath is null)
+{
+    PrintUsage();
     return 2;
 }
 
-var configPath = args[1];
 var json = await File.ReadAllTextAsync(configPath);
 var config = JsonSerializer.Deserialize<SmokeConfig>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
              ?? throw new InvalidOperationException("Could not parse config.");
@@ -31,6 +49,9 @@ Layout layout = config.Grid is { Rows: > 0, Cols: > 0 }
     ? Layout.Grid(config.Grid.Rows, config.Grid.Cols)
     : Layout.Custom(config.Cells!.Select(c => new NormRect(c.X, c.Y, c.Width, c.Height)).ToArray());
 
+// --ffmpeg CLI overrides config.ffmpeg.binaryPath, which overrides PATH lookup.
+var resolvedFfmpegPath = ffmpegPath ?? config.Ffmpeg?.BinaryPath;
+
 var options = new MosaicSessionOptions(
     Sources: sources,
     Layout: layout,
@@ -46,7 +67,10 @@ var options = new MosaicSessionOptions(
     LayoutChrome: new LayoutOptions(
         BackgroundColor: config.Chrome?.BackgroundColor ?? "black",
         BorderPx: config.Chrome?.BorderPx ?? 0,
-        ShowLabels: config.Chrome?.ShowLabels ?? false));
+        ShowLabels: config.Chrome?.ShowLabels ?? false),
+    Ffmpeg: resolvedFfmpegPath is not null
+        ? new FfmpegOptions(BinaryPath: resolvedFfmpegPath)
+        : null);
 
 await using var session = new MosaicSession(options, logger);
 session.StateChanged += (_, e) => Console.WriteLine($"[state] {e.OldState} -> {e.NewState}");
@@ -81,15 +105,30 @@ finally
 }
 return 0;
 
+static void PrintUsage()
+{
+    Console.WriteLine("MosaicSmoke — runs MosaicLiveGenerator from a JSON config against external streams.");
+    Console.WriteLine();
+    Console.WriteLine("Usage: MosaicSmoke --config <path-to-json> [--ffmpeg <path>]");
+    Console.WriteLine();
+    Console.WriteLine("Options:");
+    Console.WriteLine("  --config <path>     Required. JSON file describing sources, layout, output.");
+    Console.WriteLine("  --ffmpeg <path>     Optional. Path to ffmpeg binary.");
+    Console.WriteLine("                      Precedence: --ffmpeg > config.ffmpeg.binaryPath > PATH lookup.");
+    Console.WriteLine("  --help, -h          Show this help.");
+}
+
 internal record SmokeConfig(
     SmokeSource[] Sources,
     SmokeGrid? Grid,
     SmokeCell[]? Cells,
     SmokeOutput Output,
-    SmokeChrome? Chrome);
+    SmokeChrome? Chrome,
+    SmokeFfmpeg? Ffmpeg);
 
 internal record SmokeSource(string Name, string Uri, string Protocol, string? Fit);
 internal record SmokeGrid(int Rows, int Cols);
 internal record SmokeCell(double X, double Y, double Width, double Height);
 internal record SmokeOutput(string Uri, string Protocol, int? Width, int? Height, int? FrameRate, int? BitrateKbps, int? GopSeconds, bool? LowLatency);
 internal record SmokeChrome(string? BackgroundColor, int? BorderPx, bool? ShowLabels);
+internal record SmokeFfmpeg(string? BinaryPath);
