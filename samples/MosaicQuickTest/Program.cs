@@ -14,7 +14,7 @@ using MosaicLiveGenerator;
 
 string? ffmpegPath = null;
 var duration = TimeSpan.Zero; // 0 = run until Ctrl-C
-var outputUri = new Uri("udp://127.0.0.1:6000");
+var outputUri = new Uri("udp://239.0.0.2:6000");
 var layoutMode = LayoutMode.Grid2x2;
 var hwAccel = HwAccel.None;
 
@@ -70,17 +70,20 @@ var logger = loggerFactory.CreateLogger<MosaicSession>();
 // 1. Build the layout, pick the matching synthetic-source patterns.
 var (layout, lavfiPatterns) = BuildLayout(layoutMode);
 var sourceCount = lavfiPatterns.Length;
+// Multicast group 239.0.0.10 keeps the synthetic feeds visible to ffplay/other
+// listeners and avoids loopback bind conflicts with stale processes.
+const string sourceGroup = "239.0.0.10";
 var sourcePorts = Enumerable.Range(0, sourceCount).Select(i => 17001 + i).ToArray();
 
 // 2. Spawn the synthetic ffmpeg sources, one per tile.
 var synthetic = new List<Process>();
 for (var i = 0; i < sourceCount; i++)
 {
-    var p = StartSyntheticSource(resolvedFfmpeg, sourcePorts[i], lavfiPatterns[i], $"CAM {i + 1}");
+    var p = StartSyntheticSource(resolvedFfmpeg, sourceGroup, sourcePorts[i], lavfiPatterns[i], $"CAM {i + 1}");
     synthetic.Add(p);
 }
 
-Console.WriteLine($"Spawned {synthetic.Count} synthetic sources on ports {string.Join(",", sourcePorts)}.");
+Console.WriteLine($"Spawned {synthetic.Count} synthetic sources on {sourceGroup}:{sourcePorts[0]}-{sourcePorts[^1]}.");
 Console.WriteLine("Waiting 1.5s for sources to warm up...");
 await Task.Delay(1500);
 
@@ -88,7 +91,7 @@ await Task.Delay(1500);
 var sources = sourcePorts.Select((port, idx) =>
     new VideoSource(
         Name: $"CAM {idx + 1}",
-        Uri: new Uri($"udp://127.0.0.1:{port}"),
+        Uri: new Uri($"udp://{sourceGroup}:{port}"),
         Protocol: SourceProtocol.MpegTsUdp)).ToArray();
 
 var options = new MosaicSessionOptions(
@@ -276,7 +279,7 @@ static (Layout layout, string[] patterns) BuildLayout(LayoutMode mode)
 
 // ---- helpers ------------------------------------------------------------
 
-static Process StartSyntheticSource(string ffmpeg, int port, string lavfiPattern, string label)
+static Process StartSyntheticSource(string ffmpeg, string group, int port, string lavfiPattern, string label)
 {
     // lavfi pattern + drawtext overlay so each tile is visually identifiable,
     // re-encoded with low-latency H.264 and shipped over UDP/MPEG-TS.
@@ -300,7 +303,7 @@ static Process StartSyntheticSource(string ffmpeg, int port, string lavfiPattern
         "-pix_fmt", "yuv420p",
         "-g", "25",
         "-f", "mpegts",
-        $"udp://127.0.0.1:{port}?pkt_size=1316",
+        $"udp://{group}:{port}?pkt_size=1316",
     })
     {
         psi.ArgumentList.Add(a);
@@ -308,7 +311,7 @@ static Process StartSyntheticSource(string ffmpeg, int port, string lavfiPattern
 
     var p = new Process { StartInfo = psi };
     if (!p.Start())
-        throw new InvalidOperationException($"failed to start synthetic source on port {port}");
+        throw new InvalidOperationException($"failed to start synthetic source on {group}:{port}");
 
     // Drain stderr so the OS pipe buffer doesn't fill and block the child.
     _ = Task.Run(async () =>
@@ -362,12 +365,12 @@ static void PrintUsage()
     Console.WriteLine("  --ffmpeg <path>     Explicit path to ffmpeg binary.");
     Console.WriteLine("                      Default: looks on PATH.");
     Console.WriteLine("  --output <uri>      Output URI (udp:// or rtp://).");
-    Console.WriteLine("                      Default: udp://127.0.0.1:6000");
+    Console.WriteLine("                      Default: udp://239.0.0.2:6000 (multicast)");
     Console.WriteLine("  --duration <secs>   Auto-stop after N seconds.");
     Console.WriteLine("                      Default: run until Ctrl-C.");
     Console.WriteLine("  --help, -h          Show this help.");
     Console.WriteLine();
-    Console.WriteLine("View the mosaic with:  ffplay -fflags nobuffer -i udp://127.0.0.1:6000");
+    Console.WriteLine("View the mosaic with:  ffplay -fflags nobuffer -i udp://239.0.0.2:6000");
 }
 
 internal enum LayoutMode

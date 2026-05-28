@@ -19,7 +19,7 @@ public class InputArgBuilderTests
                 "-flags", "low_delay",
                 "-probesize", "32",
                 "-analyzeduration", "0",
-                "-i", "udp://239.0.0.1:5004?fifo_size=1000000&overrun_nonfatal=1&reconnect=1&reconnect_streamed=1&reconnect_delay_max=2"
+                "-i", "udp://239.0.0.1:5004?fifo_size=1000000&overrun_nonfatal=1&reconnect=1&reconnect_streamed=1&reconnect_delay_max=2&reuse=1"
             },
             args);
     }

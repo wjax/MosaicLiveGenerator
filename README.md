@@ -29,7 +29,7 @@ var session = new MosaicSession(new MosaicSessionOptions(
         new VideoSource("cam4", new Uri("udp://239.0.0.1:5004"), SourceProtocol.MpegTsUdp),
     },
     Layout: Layout.Grid(2, 2),
-    Output: new OutputOptions(new Uri("udp://239.0.0.2:5000"))));
+    Output: new OutputOptions(new Uri("udp://239.0.0.2:6000"))));
 
 await session.StartAsync();
 // ...

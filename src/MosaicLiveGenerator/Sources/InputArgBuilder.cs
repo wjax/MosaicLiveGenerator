@@ -33,8 +33,10 @@ internal static class InputArgBuilder
 
     private static string BuildUdpUri(Uri uri)
     {
-        // Append low-latency query params if not already present.
+        // Append low-latency query params + reuse=1 (SO_REUSEADDR) so the mosaic
+        // can recover from orphan binders, and so multicast inputs can be shared
+        // with other listeners (ffplay, recorders, additional mosaics, etc.).
         var baseUri = $"udp://{uri.Host}:{uri.Port}";
-        return baseUri + "?fifo_size=1000000&overrun_nonfatal=1&reconnect=1&reconnect_streamed=1&reconnect_delay_max=2";
+        return baseUri + "?fifo_size=1000000&overrun_nonfatal=1&reconnect=1&reconnect_streamed=1&reconnect_delay_max=2&reuse=1";
     }
 }

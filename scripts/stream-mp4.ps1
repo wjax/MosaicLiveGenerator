@@ -16,7 +16,9 @@
     Destination UDP port. Default 5001 (matches samples/MosaicSmoke/example-config.json source 1).
 
 .PARAMETER Destination
-    Destination host. Default 127.0.0.1 (loopback).
+    Destination host. Default 239.0.0.1 (multicast group). Multiple consumers
+    (mosaic + ffplay + recorders, etc.) can join this group and all receive the
+    full stream. Use 127.0.0.1 for unicast loopback if you only want one consumer.
 
 .PARAMETER BitrateKbps
     Target bitrate when transcoding. Default 3500. Ignored when -Copy.
@@ -33,7 +35,7 @@
     in -Copy mode). Default is video-only.
 
 .EXAMPLE
-    # Stream a video to udp://127.0.0.1:5001 with default transcode params
+    # Stream a video to udp://239.0.0.1:5001 (multicast) with default transcode params
     .\scripts\stream-mp4.ps1 C:\videos\sample.mp4
 
 .EXAMPLE
@@ -43,6 +45,10 @@
 .EXAMPLE
     # Pure remux, no transcode (lowest CPU, fastest startup)
     .\scripts\stream-mp4.ps1 C:\videos\sample.mp4 -Copy
+
+.EXAMPLE
+    # Unicast loopback (single consumer only)
+    .\scripts\stream-mp4.ps1 C:\videos\sample.mp4 -Destination 127.0.0.1
 
 .EXAMPLE
     # Fire 4 sources at once for a 2x2 mosaic
@@ -55,7 +61,7 @@ param(
     [Parameter(Mandatory, Position = 0)]
     [string]$File,
 
-    [string]$Destination = '127.0.0.1',
+    [string]$Destination = '239.0.0.1',
     [int]$Port = 5001,
     [int]$BitrateKbps = 3500,
     [int]$FrameRate = 25,
