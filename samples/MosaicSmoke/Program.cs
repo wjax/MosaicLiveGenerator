@@ -27,7 +27,7 @@ if (configPath is null)
     return 2;
 }
 
-var json = await File.ReadAllTextAsync(configPath);
+var json = File.ReadAllText(configPath);
 var config = JsonSerializer.Deserialize<SmokeConfig>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
              ?? throw new InvalidOperationException("Could not parse config.");
 
@@ -42,8 +42,8 @@ var logger = loggerFactory.CreateLogger<MosaicSession>();
 var sources = config.Sources.Select(s => new VideoSource(
     Name: s.Name,
     Uri: new Uri(s.Uri),
-    Protocol: Enum.Parse<SourceProtocol>(s.Protocol, ignoreCase: true),
-    Fit: Enum.Parse<TileFit>(s.Fit ?? "Letterbox", ignoreCase: true))).ToArray();
+    Protocol: (SourceProtocol)Enum.Parse(typeof(SourceProtocol), s.Protocol, ignoreCase: true),
+    Fit: (TileFit)Enum.Parse(typeof(TileFit), s.Fit ?? "Letterbox", ignoreCase: true))).ToArray();
 
 Layout layout = config.Grid is { Rows: > 0, Cols: > 0 }
     ? Layout.Grid(config.Grid.Rows, config.Grid.Cols)
@@ -54,14 +54,14 @@ var resolvedFfmpegPath = ffmpegPath ?? config.Ffmpeg?.BinaryPath;
 
 var hwAccel = config.Output.HwAccel is null
     ? HwAccel.None
-    : Enum.Parse<HwAccel>(config.Output.HwAccel, ignoreCase: true);
+    : (HwAccel)Enum.Parse(typeof(HwAccel), config.Output.HwAccel, ignoreCase: true);
 
 var options = new MosaicSessionOptions(
     Sources: sources,
     Layout: layout,
     Output: new OutputOptions(
         Uri: new Uri(config.Output.Uri),
-        Protocol: Enum.Parse<OutputProtocol>(config.Output.Protocol, ignoreCase: true),
+        Protocol: (OutputProtocol)Enum.Parse(typeof(OutputProtocol), config.Output.Protocol, ignoreCase: true),
         Width: config.Output.Width ?? 1920,
         Height: config.Output.Height ?? 1080,
         FrameRate: config.Output.FrameRate ?? 25,

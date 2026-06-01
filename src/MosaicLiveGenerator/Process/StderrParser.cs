@@ -118,5 +118,5 @@ internal sealed class StderrParser
         }
     }
 
-    public string GetStderrTail() => string.Join('\n', _tail);
+    public string GetStderrTail() => string.Join("\n", _tail);
 }

@@ -1,9 +1,13 @@
+using System.Runtime.InteropServices;
+
 namespace MosaicLiveGenerator.Process;
 
 internal static class FfmpegPathResolver
 {
+    private static bool IsWindows => RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+
     public static string ExecutableFileName =>
-        OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
+        IsWindows ? "ffmpeg.exe" : "ffmpeg";
 
     public static string Resolve(string? explicitPath)
     {
@@ -12,7 +16,7 @@ internal static class FfmpegPathResolver
             if (!File.Exists(explicitPath))
                 throw new MosaicConfigurationException(
                     $"FfmpegOptions.BinaryPath '{explicitPath}' does not exist.");
-            return explicitPath;
+            return explicitPath!;
         }
 
         var fromPath = TryFindOnPath();
@@ -28,8 +32,8 @@ internal static class FfmpegPathResolver
         var pathEnv = Environment.GetEnvironmentVariable("PATH");
         if (string.IsNullOrEmpty(pathEnv)) return null;
 
-        var separator = OperatingSystem.IsWindows() ? ';' : ':';
-        foreach (var dir in pathEnv.Split(separator, StringSplitOptions.RemoveEmptyEntries))
+        var separator = IsWindows ? ';' : ':';
+        foreach (var dir in pathEnv.Split(new[] { separator }, StringSplitOptions.RemoveEmptyEntries))
         {
             string candidate;
             try { candidate = Path.Combine(dir.Trim(), ExecutableFileName); }

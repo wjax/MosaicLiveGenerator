@@ -1,10 +1,19 @@
 <Project>
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net472</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Deterministic>true</Deterministic>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- net472 needs assembly binding redirects for transitive deps (e.g. System.Runtime.CompilerServices.Unsafe).
+         GenerateBindingRedirectsOutputType emits them for library outputs too, so the test host resolves them. -->
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- Microsoft.Extensions.* 8.0 is built against this at 6.0.0.0; pin it so the
+         older transitive 4.x assembly doesn't get copied and cause a load failure. -->
+    <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" />
+  </ItemGroup>
 </Project>

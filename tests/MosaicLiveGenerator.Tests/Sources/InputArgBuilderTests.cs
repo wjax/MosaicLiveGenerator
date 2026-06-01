@@ -33,8 +33,8 @@ public class InputArgBuilderTests
 
         Assert.Contains("-protocol_whitelist", args);
         Assert.Contains("file,udp,rtp,crypto", args);
-        Assert.Contains("/tmp/session-abc/src-3.sdp", args[^1]);
-        Assert.Equal("-i", args[^2]);
+        Assert.Contains("/tmp/session-abc/src-3.sdp", args[args.Count - 1]);
+        Assert.Equal("-i", args[args.Count - 2]);
     }
 
     [Fact]

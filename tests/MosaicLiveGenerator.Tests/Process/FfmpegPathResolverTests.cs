@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using MosaicLiveGenerator.Process;
 using Xunit;
 
@@ -46,7 +47,7 @@ public class FfmpegPathResolverTests
     [Fact]
     public void ExecutableSuffix_MatchesPlatform()
     {
-        var expected = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
+        var expected = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "ffmpeg.exe" : "ffmpeg";
         Assert.Equal(expected, FfmpegPathResolver.ExecutableFileName);
     }
 }
