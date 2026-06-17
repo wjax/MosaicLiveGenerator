@@ -42,11 +42,11 @@ internal static class FilterGraphBuilder
 
         if (!string.IsNullOrEmpty(label))
         {
-            var escapedLabel = label.Replace(@"\", @"\\").Replace("'", @"\'");
+            var escapedLabel = label!.Replace(@"\", @"\\").Replace("'", @"\'");
             sb.Append(",drawtext=");
             if (!string.IsNullOrEmpty(labelFontFile))
             {
-                sb.Append("fontfile='").Append(EscapeFilterPath(labelFontFile)).Append("':");
+                sb.Append("fontfile='").Append(EscapeFilterPath(labelFontFile!)).Append("':");
             }
             sb.Append("text='").Append(escapedLabel).Append('\'')
               .Append(":x=10:y=10:fontsize=").Append(labelFontSize)

@@ -17,7 +17,7 @@ public sealed class MosaicSession : IAsyncDisposable
 
     private IProcessHost? _host;
     private StderrParser? _parser;
-    private TaskCompletionSource? _runningTcs;
+    private TaskCompletionSource<bool>? _runningTcs;
     private TaskCompletionSource<ProcessExitInfo>? _exitTcs;
     private string? _sdpDir;
     private Exception? _startupError;
@@ -213,10 +213,10 @@ public sealed class MosaicSession : IAsyncDisposable
 
         // 4. Set up parser
         _parser = new StderrParser();
-        _runningTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _runningTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _exitTcs = new TaskCompletionSource<ProcessExitInfo>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        _parser.Running += (_, _) => _runningTcs?.TrySetResult();
+        _parser.Running += (_, _) => _runningTcs?.TrySetResult(true);
         _parser.StartupError += (_, sig) =>
         {
             _startupError = new MosaicStartupException(sig.Detail)
@@ -292,9 +292,11 @@ public sealed class MosaicSession : IAsyncDisposable
                 if (graceMs > 0)
                 {
                     using var graceCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    var graceDelay = Task.Delay(Timeout.Infinite, graceCts.Token);
                     graceCts.CancelAfter(graceMs);
-                    try { await _exitTcs.Task.WaitAsync(graceCts.Token).ConfigureAwait(false); }
-                    catch { /* timed out or cancelled – fall through to kill */ }
+                    // Whichever finishes first: graceful exit, or the grace window
+                    // expiring/cancelling. WhenAny never throws, so we just fall through to kill.
+                    await Task.WhenAny(_exitTcs.Task, graceDelay).ConfigureAwait(false);
                 }
                 if (_host.IsRunning) _host.Kill();
             }

@@ -52,9 +52,9 @@ public class StderrParserTests
         for (var i = 0; i < 100; i++) parser.Feed($"line {i}");
 
         var tail = parser.GetStderrTail();
-        var lines = tail.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var lines = tail.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal(32, lines.Length);
-        Assert.Equal("line 99", lines[^1]);
+        Assert.Equal("line 99", lines[lines.Length - 1]);
         Assert.Equal("line 68", lines[0]);
     }
 

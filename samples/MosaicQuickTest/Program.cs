@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using MosaicLiveGenerator;
 
@@ -83,7 +84,7 @@ for (var i = 0; i < sourceCount; i++)
     synthetic.Add(p);
 }
 
-Console.WriteLine($"Spawned {synthetic.Count} synthetic sources on {sourceGroup}:{sourcePorts[0]}-{sourcePorts[^1]}.");
+Console.WriteLine($"Spawned {synthetic.Count} synthetic sources on {sourceGroup}:{sourcePorts[0]}-{sourcePorts[sourcePorts.Length - 1]}.");
 Console.WriteLine("Waiting 1.5s for sources to warm up...");
 await Task.Delay(1500);
 
@@ -166,8 +167,8 @@ finally
     Console.WriteLine("Tearing down synthetic sources...");
     foreach (var p in synthetic)
     {
-        try { p.Kill(entireProcessTree: true); } catch { }
-        try { await p.WaitForExitAsync(); } catch { }
+        try { p.Kill(); } catch { }
+        try { p.WaitForExit(); } catch { }
         p.Dispose();
     }
 }
@@ -205,7 +206,7 @@ static string EncoderName(HwAccel a) => a switch
 // in most bundled ffmpeg builds. Probe common system fonts and return the first hit.
 static string? TryFindSystemFont()
 {
-    if (!OperatingSystem.IsWindows()) return null;
+    if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return null;
     string[] candidates =
     {
         @"C:\Windows\Fonts\arial.ttf",
@@ -290,7 +291,7 @@ static Process StartSyntheticSource(string ffmpeg, string group, int port, strin
         CreateNoWindow = true,
         RedirectStandardError = true,
     };
-    foreach (var a in new[]
+    psi.Arguments = BuildArguments(new[]
     {
         "-hide_banner", "-loglevel", "warning",
         "-re",
@@ -304,10 +305,7 @@ static Process StartSyntheticSource(string ffmpeg, string group, int port, strin
         "-g", "25",
         "-f", "mpegts",
         $"udp://{group}:{port}?pkt_size=1316",
-    })
-    {
-        psi.ArgumentList.Add(a);
-    }
+    });
 
     var p = new Process { StartInfo = psi };
     if (!p.Start())
@@ -332,10 +330,10 @@ static string? TryFindFfmpegOnPath()
     var pathEnv = Environment.GetEnvironmentVariable("PATH");
     if (string.IsNullOrEmpty(pathEnv)) return null;
 
-    var exeName = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
-    var separator = OperatingSystem.IsWindows() ? ';' : ':';
+    var exeName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "ffmpeg.exe" : "ffmpeg";
+    var separator = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? ';' : ':';
 
-    foreach (var dir in pathEnv.Split(separator, StringSplitOptions.RemoveEmptyEntries))
+    foreach (var dir in pathEnv.Split(new[] { separator }, StringSplitOptions.RemoveEmptyEntries))
     {
         string candidate;
         try { candidate = Path.Combine(dir.Trim(), exeName); }
@@ -343,6 +341,40 @@ static string? TryFindFfmpegOnPath()
         if (File.Exists(candidate)) return candidate;
     }
     return null;
+}
+
+// net472 has no ProcessStartInfo.ArgumentList; escape each arg into the single
+// Arguments string the way the modern runtime would.
+static string BuildArguments(IEnumerable<string> args)
+{
+    var sb = new System.Text.StringBuilder();
+    foreach (var arg in args)
+    {
+        if (sb.Length != 0) sb.Append(' ');
+        if (arg.Length != 0 && !arg.Any(c => char.IsWhiteSpace(c) || c == '"'))
+        {
+            sb.Append(arg);
+            continue;
+        }
+        sb.Append('"');
+        int i = 0;
+        while (i < arg.Length)
+        {
+            char c = arg[i++];
+            if (c == '\\')
+            {
+                int n = 1;
+                while (i < arg.Length && arg[i] == '\\') { i++; n++; }
+                if (i == arg.Length) sb.Append('\\', n * 2);
+                else if (arg[i] == '"') { sb.Append('\\', n * 2 + 1); sb.Append('"'); i++; }
+                else sb.Append('\\', n);
+            }
+            else if (c == '"') { sb.Append('\\'); sb.Append('"'); }
+            else sb.Append(c);
+        }
+        sb.Append('"');
+    }
+    return sb.ToString();
 }
 
 static void PrintUsage()

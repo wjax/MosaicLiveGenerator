@@ -39,7 +39,7 @@ internal sealed class FakeProcessHost : IProcessHost
     public ValueTask DisposeAsync()
     {
         Disposed = true;
-        return ValueTask.CompletedTask;
+        return default;
     }
 
     // Test driving methods:
