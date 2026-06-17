@@ -25,7 +25,7 @@ internal sealed class FfmpegProcessHost : IProcessHost
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-        foreach (var a in args) psi.ArgumentList.Add(a);
+        psi.Arguments = ProcessArguments.ToCommandLine(args);
 
         var p = new System.Diagnostics.Process { StartInfo = psi, EnableRaisingEvents = true };
         p.Exited += OnExited;
@@ -50,7 +50,7 @@ internal sealed class FfmpegProcessHost : IProcessHost
         try
         {
             string? line;
-            while ((line = await p.StandardError.ReadLineAsync(ct).ConfigureAwait(false)) is not null)
+            while ((line = await p.StandardError.ReadLineAsync().ConfigureAwait(false)) is not null)
             {
                 StderrLineReceived?.Invoke(this, line);
             }
@@ -71,15 +71,15 @@ internal sealed class FfmpegProcessHost : IProcessHost
         if (_process is null || _process.HasExited) return;
         try
         {
-            await _process.StandardInput.WriteLineAsync(new ReadOnlyMemory<char>("q".ToCharArray()), ct).ConfigureAwait(false);
-            await _process.StandardInput.FlushAsync(ct).ConfigureAwait(false);
+            await _process.StandardInput.WriteLineAsync("q").ConfigureAwait(false);
+            await _process.StandardInput.FlushAsync().ConfigureAwait(false);
         }
         catch (Exception) { /* fall through to kill */ }
     }
 
     public void Kill()
     {
-        try { _process?.Kill(entireProcessTree: true); }
+        try { _process?.Kill(); }
         catch { }
     }
 

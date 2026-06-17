@@ -22,7 +22,7 @@ internal sealed class SyntheticSource : IAsyncDisposable
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-        foreach (var a in new[]
+        psi.Arguments = ProcessArguments.ToCommandLine(new[]
         {
             "-hide_banner", "-loglevel", "warning",
             "-re",
@@ -32,16 +32,17 @@ internal sealed class SyntheticSource : IAsyncDisposable
             "-g", rate.ToString(),
             "-f", "mpegts",
             $"udp://127.0.0.1:{port}?pkt_size=1316"
-        }) psi.ArgumentList.Add(a);
+        });
 
         _proc = new System.Diagnostics.Process { StartInfo = psi };
         if (!_proc.Start()) throw new InvalidOperationException("failed to start synthetic source");
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        try { _proc.Kill(entireProcessTree: true); } catch { }
-        try { await _proc.WaitForExitAsync(); } catch { }
+        try { _proc.Kill(); } catch { }
+        try { _proc.WaitForExit(); } catch { }
         _proc.Dispose();
+        return default;
     }
 }

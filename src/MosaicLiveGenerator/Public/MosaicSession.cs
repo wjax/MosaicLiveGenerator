@@ -8,15 +8,16 @@ namespace MosaicLiveGenerator;
 
 public sealed class MosaicSession : IAsyncDisposable
 {
-    private readonly MosaicSessionOptions _options;
     private readonly ILogger<MosaicSession> _logger;
     private readonly Func<IProcessHost> _processHostFactory;
     private readonly SessionStateMachine _state = new();
-    private readonly SourceStateTable _sourceStates;
+
+    private MosaicSessionOptions _options;
+    private SourceStateTable _sourceStates;
 
     private IProcessHost? _host;
     private StderrParser? _parser;
-    private TaskCompletionSource? _runningTcs;
+    private TaskCompletionSource<bool>? _runningTcs;
     private TaskCompletionSource<ProcessExitInfo>? _exitTcs;
     private string? _sdpDir;
     private Exception? _startupError;
@@ -62,87 +63,7 @@ public sealed class MosaicSession : IAsyncDisposable
 
         try
         {
-            // 1. Resolve ffmpeg
-            var binary = FfmpegPathResolver.Resolve(_options.Ffmpeg?.BinaryPath);
-
-            // 2. Write SDP files for RTP inputs
-            _sdpDir = CreateSdpDirectory();
-            for (var i = 0; i < _options.Sources.Count; i++)
-            {
-                var src = _options.Sources[i];
-                if (src.Protocol == SourceProtocol.RtpH264)
-                {
-                    var sdp = MosaicLiveGenerator.Sources.SdpGenerator.BuildSdp(src, i);
-                    File.WriteAllText(Path.Combine(_sdpDir, $"src-{i}.sdp"), sdp);
-                }
-            }
-
-            // 3. Build args
-            var (args, _) = MosaicLiveGenerator.Composition.FfmpegCommandBuilder.Build(_options, _sdpDir);
-
-            // 4. Set up parser
-            _parser = new StderrParser();
-            _runningTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            _exitTcs = new TaskCompletionSource<ProcessExitInfo>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-            _parser.Running += (_, _) => _runningTcs?.TrySetResult();
-            _parser.StartupError += (_, sig) =>
-            {
-                _startupError = new MosaicStartupException(sig.Detail)
-                {
-                    Reason = sig.Reason,
-                    StderrTail = _parser?.GetStderrTail() ?? ""
-                };
-                _runningTcs?.TrySetException(_startupError);
-            };
-            _parser.SourceConnectivity += OnSourceConnectivitySignal;
-            _parser.OutputSdp += (_, sig) => OutputSdp = sig.Sdp;
-
-            // 5. Spawn process
-            _host = _processHostFactory();
-            _host.StderrLineReceived += (_, line) =>
-            {
-                _parser?.Feed(line);
-                if (_options.Ffmpeg?.LogStderr ?? true) LogStderr(line);
-            };
-            _host.Exited += OnProcessExited;
-
-            await _host.StartAsync(binary, args, ct).ConfigureAwait(false);
-
-            // 6. Wait for Running, exit, or timeout
-            var timeout = _options.Ffmpeg?.StartupTimeout ?? TimeSpan.Zero;
-            if (timeout == TimeSpan.Zero) timeout = TimeSpan.FromSeconds(10);
-
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(timeout);
-
-            var timeoutTask = Task.Delay(Timeout.Infinite, timeoutCts.Token);
-            var first = await Task.WhenAny(_runningTcs.Task, _exitTcs.Task, timeoutTask).ConfigureAwait(false);
-
-            if (first == _runningTcs.Task)
-            {
-                await _runningTcs.Task.ConfigureAwait(false); // throws if startup error already raised
-                _state.TryTransition(SessionState.Starting, SessionState.Running);
-                return;
-            }
-
-            if (first == _exitTcs.Task)
-            {
-                var info = await _exitTcs.Task.ConfigureAwait(false);
-                throw new MosaicStartupException($"ffmpeg exited during startup with code {info.ExitCode}.")
-                {
-                    Reason = MosaicStartupReason.ImmediateExit,
-                    StderrTail = _parser?.GetStderrTail() ?? ""
-                };
-            }
-
-            // timeoutTask: either canceled by ct or by the StartupTimeout
-            ct.ThrowIfCancellationRequested();
-            throw new MosaicStartupException($"ffmpeg did not produce a frame within {timeout}.")
-            {
-                Reason = MosaicStartupReason.Timeout,
-                StderrTail = _parser?.GetStderrTail() ?? ""
-            };
+            await RunStartupAsync(ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -151,6 +72,87 @@ public sealed class MosaicSession : IAsyncDisposable
             await SafeTearDownAsync().ConfigureAwait(false);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Stops the current ffmpeg process, replaces the session configuration with
+    /// <paramref name="newOptions"/>, and immediately starts a new ffmpeg process.
+    /// The state transitions are: Running/Faulted → Reconfiguring → Starting → Running.
+    /// </summary>
+    /// <remarks>
+    /// The output endpoint (URI and protocol) must remain the same as the original options.
+    /// All other fields — sources, layout, chrome, frame rate, bitrate — may be changed freely.
+    /// </remarks>
+    public async Task ReconfigureAsync(MosaicSessionOptions newOptions, CancellationToken ct = default)
+    {
+        if (newOptions is null) throw new ArgumentNullException(nameof(newOptions));
+
+        // Validate the new options before touching any running state.
+        Validate(newOptions);
+
+        var current = _state.Current;
+        if (current is not (SessionState.Running or SessionState.Faulted))
+            throw new InvalidOperationException($"Cannot reconfigure: state={current}.");
+        if (!_state.TryTransition(current, SessionState.Reconfiguring))
+            throw new InvalidOperationException($"Cannot reconfigure: state={_state.Current}.");
+
+        try
+        {
+            // Stop the running process and clean up its resources.
+            await TearDownProcessAsync(ct).ConfigureAwait(false);
+
+            // Swap in the new configuration.
+            ResetForOptions(newOptions);
+
+            // Proceed to startup.
+            _state.TryTransition(SessionState.Reconfiguring, SessionState.Starting);
+            await RunStartupAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Try Starting→Faulted first (RunStartupAsync is the last step and most likely to fail).
+            if (!_state.TryTransition(SessionState.Starting, SessionState.Faulted))
+                _state.TryTransition(SessionState.Reconfiguring, SessionState.Faulted);
+            LastError = ex;
+            await SafeTearDownAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Reconfigures the tile layout (and optionally the chrome options) without changing
+    /// the sources or output endpoint. The source count must be compatible with the new layout.
+    /// </summary>
+    public Task ReconfigureLayoutAsync(
+        Layout newLayout,
+        LayoutOptions? newChrome = null,
+        CancellationToken ct = default)
+    {
+        if (newLayout is null) throw new ArgumentNullException(nameof(newLayout));
+        var newOptions = _options with
+        {
+            Layout = newLayout,
+            LayoutChrome = newChrome ?? _options.LayoutChrome,
+        };
+        return ReconfigureAsync(newOptions, ct);
+    }
+
+    /// <summary>
+    /// Reconfigures the video sources (and optionally the layout). When <paramref name="newLayout"/>
+    /// is null the existing layout is reused, which requires the source count to remain the same.
+    /// </summary>
+    public Task ReconfigureSourcesAsync(
+        IReadOnlyList<VideoSource> newSources,
+        Layout? newLayout = null,
+        CancellationToken ct = default)
+    {
+        if (newSources is null) throw new ArgumentNullException(nameof(newSources));
+        var newOptions = _options with
+        {
+            Sources = newSources,
+            Layout = newLayout ?? _options.Layout,
+        };
+        return ReconfigureAsync(newOptions, ct);
     }
 
     public async Task StopAsync(CancellationToken ct = default)
@@ -168,31 +170,7 @@ public sealed class MosaicSession : IAsyncDisposable
 
         try
         {
-            if (_host is { IsRunning: true })
-            {
-                try { await _host.SendGracefulQuitAsync(ct).ConfigureAwait(false); }
-                catch { /* fall through to kill */ }
-
-                if (_exitTcs is not null)
-                {
-                    // Wait up to 5 s for a graceful exit; cancellation shortens the window.
-                    var graceMs = ct.IsCancellationRequested
-                        ? 0
-                        : (int)TimeSpan.FromSeconds(5).TotalMilliseconds;
-                    if (graceMs > 0)
-                    {
-                        using var graceCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                        graceCts.CancelAfter(graceMs);
-                        try { await _exitTcs.Task.WaitAsync(graceCts.Token).ConfigureAwait(false); }
-                        catch { /* timed out or cancelled – fall through to kill */ }
-                    }
-                    if (_host.IsRunning) _host.Kill();
-                }
-                else
-                {
-                    _host.Kill();
-                }
-            }
+            await TearDownProcessAsync(ct).ConfigureAwait(false);
         }
         finally
         {
@@ -208,6 +186,140 @@ public sealed class MosaicSession : IAsyncDisposable
             try { await StopAsync().ConfigureAwait(false); }
             catch { /* swallow during dispose */ }
         }
+    }
+
+    // ── private helpers ──────────────────────────────────────────────────────
+
+    /// <summary>Runs the ffmpeg startup sequence. State must already be Starting when called.</summary>
+    private async Task RunStartupAsync(CancellationToken ct)
+    {
+        // 1. Resolve ffmpeg
+        var binary = FfmpegPathResolver.Resolve(_options.Ffmpeg?.BinaryPath);
+
+        // 2. Write SDP files for RTP inputs
+        _sdpDir = CreateSdpDirectory();
+        for (var i = 0; i < _options.Sources.Count; i++)
+        {
+            var src = _options.Sources[i];
+            if (src.Protocol == SourceProtocol.RtpH264)
+            {
+                var sdp = MosaicLiveGenerator.Sources.SdpGenerator.BuildSdp(src, i);
+                File.WriteAllText(Path.Combine(_sdpDir, $"src-{i}.sdp"), sdp);
+            }
+        }
+
+        // 3. Build args
+        var (args, _) = MosaicLiveGenerator.Composition.FfmpegCommandBuilder.Build(_options, _sdpDir);
+
+        // 4. Set up parser
+        _parser = new StderrParser();
+        _runningTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _exitTcs = new TaskCompletionSource<ProcessExitInfo>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        _parser.Running += (_, _) => _runningTcs?.TrySetResult(true);
+        _parser.StartupError += (_, sig) =>
+        {
+            _startupError = new MosaicStartupException(sig.Detail)
+            {
+                Reason = sig.Reason,
+                StderrTail = _parser?.GetStderrTail() ?? ""
+            };
+            _runningTcs?.TrySetException(_startupError);
+        };
+        _parser.SourceConnectivity += OnSourceConnectivitySignal;
+        _parser.OutputSdp += (_, sig) => OutputSdp = sig.Sdp;
+
+        // 5. Spawn process
+        _host = _processHostFactory();
+        _host.StderrLineReceived += (_, line) =>
+        {
+            _parser?.Feed(line);
+            if (_options.Ffmpeg?.LogStderr ?? true) LogStderr(line);
+        };
+        _host.Exited += OnProcessExited;
+
+        await _host.StartAsync(binary, args, ct).ConfigureAwait(false);
+
+        // 6. Wait for Running, exit, or timeout
+        var timeout = _options.Ffmpeg?.StartupTimeout ?? TimeSpan.Zero;
+        if (timeout == TimeSpan.Zero) timeout = TimeSpan.FromSeconds(10);
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(timeout);
+
+        var timeoutTask = Task.Delay(Timeout.Infinite, timeoutCts.Token);
+        var first = await Task.WhenAny(_runningTcs.Task, _exitTcs.Task, timeoutTask).ConfigureAwait(false);
+
+        if (first == _runningTcs.Task)
+        {
+            await _runningTcs.Task.ConfigureAwait(false); // throws if startup error already raised
+            _state.TryTransition(SessionState.Starting, SessionState.Running);
+            return;
+        }
+
+        if (first == _exitTcs.Task)
+        {
+            var info = await _exitTcs.Task.ConfigureAwait(false);
+            throw new MosaicStartupException($"ffmpeg exited during startup with code {info.ExitCode}.")
+            {
+                Reason = MosaicStartupReason.ImmediateExit,
+                StderrTail = _parser?.GetStderrTail() ?? ""
+            };
+        }
+
+        // timeoutTask: either canceled by ct or by the StartupTimeout
+        ct.ThrowIfCancellationRequested();
+        throw new MosaicStartupException($"ffmpeg did not produce a frame within {timeout}.")
+        {
+            Reason = MosaicStartupReason.Timeout,
+            StderrTail = _parser?.GetStderrTail() ?? ""
+        };
+    }
+
+    /// <summary>Gracefully stops the ffmpeg process and disposes host resources.</summary>
+    private async Task TearDownProcessAsync(CancellationToken ct)
+    {
+        if (_host is { IsRunning: true })
+        {
+            try { await _host.SendGracefulQuitAsync(ct).ConfigureAwait(false); }
+            catch { /* fall through to kill */ }
+
+            if (_exitTcs is not null)
+            {
+                var graceMs = ct.IsCancellationRequested
+                    ? 0
+                    : (int)TimeSpan.FromSeconds(5).TotalMilliseconds;
+                if (graceMs > 0)
+                {
+                    using var graceCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    var graceDelay = Task.Delay(Timeout.Infinite, graceCts.Token);
+                    graceCts.CancelAfter(graceMs);
+                    // Whichever finishes first: graceful exit, or the grace window
+                    // expiring/cancelling. WhenAny never throws, so we just fall through to kill.
+                    await Task.WhenAny(_exitTcs.Task, graceDelay).ConfigureAwait(false);
+                }
+                if (_host.IsRunning) _host.Kill();
+            }
+            else
+            {
+                _host.Kill();
+            }
+        }
+
+        await SafeTearDownAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Replaces the active options and resets all per-session mutable fields.</summary>
+    private void ResetForOptions(MosaicSessionOptions newOptions)
+    {
+        _options = newOptions;
+        _sourceStates = new SourceStateTable(newOptions.Sources);
+        OutputSdp = null;
+        LastError = null;
+        _parser = null;
+        _runningTcs = null;
+        _exitTcs = null;
+        _startupError = null;
     }
 
     private void OnSourceConnectivitySignal(object? sender, SourceConnectivitySignal sig)

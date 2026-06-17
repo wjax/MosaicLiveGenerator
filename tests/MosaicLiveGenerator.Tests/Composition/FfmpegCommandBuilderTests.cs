@@ -34,7 +34,7 @@ public class FfmpegCommandBuilderTests
         Assert.Equal("[out]", args[mapIdx + 1]);
 
         // ends with the output URI
-        Assert.EndsWith("?pkt_size=1316", args[^1]);
+        Assert.EndsWith("?pkt_size=1316", args[args.Count - 1]);
     }
 
     [Fact]

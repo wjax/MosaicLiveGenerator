@@ -38,16 +38,21 @@ public class SessionStateMachineTests
     }
 
     [Theory]
-    [InlineData(SessionState.Stopped, SessionState.Starting, true)]
-    [InlineData(SessionState.Starting, SessionState.Running, true)]
-    [InlineData(SessionState.Starting, SessionState.Faulted, true)]
-    [InlineData(SessionState.Running, SessionState.Faulted, true)]
-    [InlineData(SessionState.Running, SessionState.Stopping, true)]
-    [InlineData(SessionState.Starting, SessionState.Stopping, true)]
-    [InlineData(SessionState.Faulted, SessionState.Stopping, true)]
-    [InlineData(SessionState.Stopping, SessionState.Stopped, true)]
-    [InlineData(SessionState.Stopped, SessionState.Running, false)]
-    [InlineData(SessionState.Running, SessionState.Stopped, false)]
+    [InlineData(SessionState.Stopped,       SessionState.Starting,      true)]
+    [InlineData(SessionState.Starting,      SessionState.Running,       true)]
+    [InlineData(SessionState.Starting,      SessionState.Faulted,       true)]
+    [InlineData(SessionState.Running,       SessionState.Faulted,       true)]
+    [InlineData(SessionState.Running,       SessionState.Stopping,      true)]
+    [InlineData(SessionState.Starting,      SessionState.Stopping,      true)]
+    [InlineData(SessionState.Faulted,       SessionState.Stopping,      true)]
+    [InlineData(SessionState.Stopping,      SessionState.Stopped,       true)]
+    [InlineData(SessionState.Running,       SessionState.Reconfiguring, true)]
+    [InlineData(SessionState.Faulted,       SessionState.Reconfiguring, true)]
+    [InlineData(SessionState.Reconfiguring, SessionState.Starting,      true)]
+    [InlineData(SessionState.Reconfiguring, SessionState.Faulted,       true)]
+    [InlineData(SessionState.Stopped,       SessionState.Running,       false)]
+    [InlineData(SessionState.Running,       SessionState.Stopped,       false)]
+    [InlineData(SessionState.Stopped,       SessionState.Reconfiguring, false)]
     public void TransitionRules(SessionState from, SessionState to, bool allowed)
     {
         Assert.Equal(allowed, SessionStateMachine.IsAllowed(from, to));
