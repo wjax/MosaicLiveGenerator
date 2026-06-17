@@ -32,14 +32,18 @@ internal sealed class SessionStateMachine
     {
         return (from, to) switch
         {
-            (SessionState.Stopped,  SessionState.Starting) => true,
-            (SessionState.Starting, SessionState.Running)  => true,
-            (SessionState.Starting, SessionState.Faulted)  => true,
-            (SessionState.Starting, SessionState.Stopping) => true,
-            (SessionState.Running,  SessionState.Faulted)  => true,
-            (SessionState.Running,  SessionState.Stopping) => true,
-            (SessionState.Faulted,  SessionState.Stopping) => true,
-            (SessionState.Stopping, SessionState.Stopped)  => true,
+            (SessionState.Stopped,       SessionState.Starting)      => true,
+            (SessionState.Starting,      SessionState.Running)       => true,
+            (SessionState.Starting,      SessionState.Faulted)       => true,
+            (SessionState.Starting,      SessionState.Stopping)      => true,
+            (SessionState.Running,       SessionState.Faulted)       => true,
+            (SessionState.Running,       SessionState.Stopping)      => true,
+            (SessionState.Running,       SessionState.Reconfiguring) => true,
+            (SessionState.Faulted,       SessionState.Stopping)      => true,
+            (SessionState.Faulted,       SessionState.Reconfiguring) => true,
+            (SessionState.Stopping,      SessionState.Stopped)       => true,
+            (SessionState.Reconfiguring, SessionState.Starting)      => true,
+            (SessionState.Reconfiguring, SessionState.Faulted)       => true,
             _ => false,
         };
     }
