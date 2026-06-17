@@ -174,6 +174,7 @@ public sealed class MosaicSession : IAsyncDisposable
         }
         finally
         {
+            await SafeTearDownAsync().ConfigureAwait(false);
             _state.TryTransition(SessionState.Stopping, SessionState.Stopped);
         }
     }
